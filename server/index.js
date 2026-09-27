@@ -33,6 +33,7 @@ import {
 } from "./collectors/PrefillBench.js";
 import { showcaseManager } from "./collectors/ShowcaseManager.js";
 import { llmProbeHost } from "./collectors/llmHost.js";
+import { LiteLLMProbe } from "./collectors/LiteLLMProbe.js";
 import { onceClose, resolveLlmHttpTarget } from "./collectors/llmTunnel.js";
 import { formatLlmBaseUrl, parseLlmTargetInput } from "../src/shared/llmTarget.js";
 import { llmDaily } from "./collectors/LlmDaily.js";
@@ -337,6 +338,19 @@ registerLlmTokenTotalsRoute(app, llmTokenLedger);
 // Never return SSH passwords in any response
 app.get("/api/sparks", (_req, res) => {
   res.json({ sparks: registry.publicSparks });
+});
+
+// LiteLLM per-key usage (the "Ted" fork addition). One lumped probe for the
+// whole fleet's front door. Reads LITELLM_PROBE_URL / LITELLM_PROBE_KEY from env.
+// Returns per-key token counts, friendly label, spend, and cost-at-reference-MSRP.
+app.get("/api/litellm/keys", async (_req, res) => {
+  try {
+    const probe = new LiteLLMProbe();
+    const keys = await probe.poll();
+    res.json({ enabled: probe.enabled, error: probe.error, model: keys[0]?.model || null, keys });
+  } catch (e) {
+    res.status(500).json({ enabled: false, error: e.message, keys: [] });
+  }
 });
 
 // Ephemeral connectivity test — does not persist or start a monitor
