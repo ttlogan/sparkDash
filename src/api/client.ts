@@ -1,4 +1,5 @@
 import type {
+  LiteLlmKeysResponse,
   DecodeBenchJob,
   DecodeBenchListResponse,
   FleetEnergy,
@@ -51,6 +52,11 @@ export function fetchSparks(): Promise<{ sparks: SparkConfig[] }> {
 
 export function fetchFleetEnergy(): Promise<FleetEnergy> {
   return apiFetch("/api/fleet-energy");
+}
+
+/** Per-key LiteLLM usage (labels, tokens, spend, cost-at-MSRP). */
+export function fetchLiteLlmKeys(): Promise<LiteLlmKeysResponse> {
+  return apiFetch("/api/litellm/keys");
 }
 
 /** Latest metrics snapshot for one Spark (includes per-port LLM modelId). */

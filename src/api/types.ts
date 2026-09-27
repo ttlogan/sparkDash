@@ -573,6 +573,24 @@ export interface FleetEnergy {
   hourlyWatts24h: Array<number | null>;
 }
 
+export interface LiteLlmKey {
+  keyHash: string;
+  label: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  spend: number;
+  costAtMsrp: number;
+  model?: string | null;
+}
+
+export interface LiteLlmKeysResponse {
+  enabled: boolean;
+  error: string | null;
+  model: string | null;
+  keys: LiteLlmKey[];
+}
+
 // ─── API responses ────────────────────────────────────────
 export interface Settings {
   pollIntervalMs: number;
