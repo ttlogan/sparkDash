@@ -5,6 +5,7 @@ import { shutdownAllSparks, updateAllHermes, wakeAllSparks } from "../../api/cli
 import { ConfirmShutdownDialog } from "../ConfirmShutdownDialog";
 import { MetricBar } from "../ui/MetricBar";
 import { FleetEnergyCard } from "./FleetEnergyCard";
+import { LiteLlmKeysPanel } from "./LiteLlmKeysPanel";
 import { FleetAlertStrip } from "./FleetAlertStrip";
 import { FleetTokenTotals } from "./FleetTokenTotals";
 import { ActivityIcon, PowerOffIcon, PowerOnIcon, RotateIcon } from "../ui/icons";
@@ -570,7 +571,10 @@ export function OverviewPage({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--density-overview-rhythm)" }}>
+      <>
       {showFleetEnergy ? <FleetEnergyCard nodeCount={sparks.length} /> : null}
+      <LiteLlmKeysPanel />
+      </>
       {showFleetExceptions ? <FleetAlertStrip sparks={sparks} onSelect={onSelectSpark} /> : null}
       <div className="flex flex-wrap items-end justify-between gap-6">
         <h1
