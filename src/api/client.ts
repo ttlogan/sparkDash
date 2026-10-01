@@ -20,7 +20,7 @@ import type {
   StartPrefillBenchRequest,
 } from "./types";
 
-const BASE = "";
+const BASE = "/sparkdash";
 const TOKEN = (typeof localStorage !== "undefined" && localStorage.getItem("sparkdashToken")) || "";
 
 function authHeaders(): Record<string, string> {

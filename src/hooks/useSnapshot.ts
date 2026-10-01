@@ -4,7 +4,7 @@ import { ingestSnapshots } from "./metricsStore";
 import { OVERVIEW_ID } from "../constants";
 
 const TOKEN = (typeof localStorage !== "undefined" && localStorage.getItem("sparkdashToken")) || "";
-const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""}`;
+const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/sparkdash/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""}`;
 const RECONNECT_DELAY = 2000;
 
 /**
