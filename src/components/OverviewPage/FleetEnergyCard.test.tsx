@@ -22,6 +22,13 @@ function energy(overrides: Partial<FleetEnergy> = {}): FleetEnergy {
     currentWatts30s: 240,
     energy24hKwh: 1.5,
     energy31dKwh: 40,
+    energyTodayKwh: 0.8,
+    energyThisMonthKwh: 6.5,
+    energyLastMonthKwh: 18,
+    energyTotalKwh: 120,
+    periodDayStartMs: 1_700_000_000_000,
+    periodMonthStartMs: 1_691_000_000_000,
+    periodLastMonthStartMs: 1_683_000_000_000,
     whPerOutputToken24h: 0.0123,
     outputTokens24h: 100,
     coverage24hMs: 86_400_000,
@@ -34,6 +41,10 @@ function energy(overrides: Partial<FleetEnergy> = {}): FleetEnergy {
     electricityPricePerKwh: 0.3,
     cost24hEuros: 1.5 * 0.3,
     cost31dEuros: 40 * 0.3,
+    costTodayEuros: 0.8 * 0.3,
+    costThisMonthEuros: 6.5 * 0.3,
+    costLastMonthEuros: 18 * 0.3,
+    costTotalEuros: 120 * 0.3,
     ...overrides,
   };
 }
@@ -49,9 +60,16 @@ describe("FleetEnergyCard states", () => {
     expect(container.textContent).toContain("24h coverage 100.0%");
     expect(container.textContent).toContain("240 W");
     expect(container.textContent).toContain("0.0123 Wh/token");
-    // Cost to date uses the longest available window (31d) at the configured price.
+    // Cost to date uses the monotonic lifetime total at the configured price.
     expect(container.textContent).toContain("Cost to date");
-    expect(container.textContent).toContain("€12.00");
+    expect(container.textContent).toContain("€36.00");
+    // Calendar-period cost tiles (today / this month / last month).
+    expect(container.textContent).toContain("Today");
+    expect(container.textContent).toContain("€0.24");
+    expect(container.textContent).toContain("This month");
+    expect(container.textContent).toContain("€1.95");
+    expect(container.textContent).toContain("Last month");
+    expect(container.textContent).toContain("€5.40");
     const bars = [...container.querySelectorAll("[aria-label] span")];
     expect(bars.filter((bar) => (bar as HTMLElement).style.height === "0px" || (bar as HTMLElement).style.height === "0")).toHaveLength(6);
   });

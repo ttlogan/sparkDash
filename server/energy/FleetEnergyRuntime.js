@@ -90,6 +90,14 @@ export function createFleetEnergyHandler(tracker) {
         snapshot.energy24hKwh == null ? null : snapshot.energy24hKwh * pricePerKwh,
       cost31dEuros:
         snapshot.energy31dKwh == null ? null : snapshot.energy31dKwh * pricePerKwh,
+      costTodayEuros:
+        snapshot.energyTodayKwh == null ? null : snapshot.energyTodayKwh * pricePerKwh,
+      costThisMonthEuros:
+        snapshot.energyThisMonthKwh == null ? null : snapshot.energyThisMonthKwh * pricePerKwh,
+      costLastMonthEuros:
+        snapshot.energyLastMonthKwh == null ? null : snapshot.energyLastMonthKwh * pricePerKwh,
+      costTotalEuros:
+        snapshot.energyTotalKwh == null ? null : snapshot.energyTotalKwh * pricePerKwh,
     });
   };
 }

@@ -180,6 +180,13 @@ const APPROVED_RESPONSE_FIELDS = [
   "currentWatts30s",
   "energy24hKwh",
   "energy31dKwh",
+  "energyTodayKwh",
+  "energyThisMonthKwh",
+  "energyLastMonthKwh",
+  "energyTotalKwh",
+  "periodDayStartMs",
+  "periodMonthStartMs",
+  "periodLastMonthStartMs",
   "whPerOutputToken24h",
   "outputTokens24h",
   "coverage24hMs",
@@ -192,6 +199,10 @@ const APPROVED_RESPONSE_FIELDS = [
   "electricityPricePerKwh",
   "cost24hEuros",
   "cost31dEuros",
+  "costTodayEuros",
+  "costThisMonthEuros",
+  "costLastMonthEuros",
+  "costTotalEuros",
 ];
 
 function assertNullableFiniteNumber(value) {
@@ -220,9 +231,16 @@ function assertFleetEnergyResponseContract(response) {
     "currentWatts30s",
     "energy24hKwh",
     "energy31dKwh",
+    "energyTodayKwh",
+    "energyThisMonthKwh",
+    "energyLastMonthKwh",
+    "energyTotalKwh",
     "whPerOutputToken24h",
   ]) {
     assertNullableFiniteNumber(response[field]);
+  }
+  for (const field of ["periodDayStartMs", "periodMonthStartMs", "periodLastMonthStartMs"]) {
+    assert.ok(Number.isFinite(response[field]), field);
   }
   for (const field of ["nodeCoverage24hMs", "nodeCoverage31dMs"]) {
     assert.deepEqual(Object.keys(response[field]), CANONICAL_NODE_IDS);
@@ -384,6 +402,67 @@ test("fleet-energy handler returns the exact populated tracker response contract
   assert.ok(response.whPerOutputToken24h > 0);
   assert.equal(response.outputTokens24h, 20);
   assert.equal(response.hourlyWatts24h.some(Number.isFinite), true);
+});
+
+test("fleet-energy handler returns calendar-period energy split by local day/month boundaries", () => {
+  const createFleetEnergyHandler = runtimeFunction("createFleetEnergyHandler");
+  // Fixed "now" near the start of a month so the prior month still falls within
+  // the 31-day retention window. Local boundaries derive from the process TZ,
+  // so we compute them the same way the tracker does to stay deterministic.
+  const now = Date.UTC(2026, 8, 1, 12, 34, 0); // Sept 1 2026
+  const date = new Date(now);
+  const dayStartMs = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const monthStartMs = new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+  const lastMonthStartMs = new Date(date.getFullYear(), date.getMonth() - 1, 1).getTime();
+
+  const tracker = new FleetEnergyTracker({ ...noTimerOptions(), now: () => now });
+  // Buckets spread across: last month, earlier this month, and today.
+  // Each record integrates a constant 100 W/node * 4 nodes = 400 W fleet.
+  const lastMonthBucket = lastMonthStartMs + 30 * MINUTE_MS;
+  const thisMonthBucket = monthStartMs + 60 * MINUTE_MS;
+  const todayBucket = dayStartMs + 90 * MINUTE_MS;
+  // Record a previous instant, then the bucket instant, so integration is valid.
+  for (const bucket of [lastMonthBucket, thisMonthBucket, todayBucket]) {
+    tracker.record(fleetSnapshots(100), bucket - 2_000);
+    tracker.record(fleetSnapshots(100), bucket);
+  }
+
+  const snapshot = tracker.snapshot(now);
+  // Calendar periods are bounded by [start, now]. last month is sealed and
+  // excludes anything this month or today.
+  assert.ok(snapshot.energyLastMonthKwh > 0, "last month has energy");
+  assert.ok(snapshot.energyThisMonthKwh > 0, "this month has energy");
+  assert.ok(snapshot.energyTodayKwh > 0, "today has energy");
+  // This month must include today's energy (same period or later).
+  assert.ok(snapshot.energyThisMonthKwh >= snapshot.energyTodayKwh);
+  // Last month is an earlier, disjoint period.
+  assert.equal(snapshot.periodLastMonthStartMs, lastMonthStartMs);
+  assert.equal(snapshot.periodMonthStartMs, monthStartMs);
+  assert.equal(snapshot.periodDayStartMs, dayStartMs);
+});
+
+test("lifetime cumulative energy total is monotonic across pruning and reload", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sparkdash-energy-total-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, "fleet-energy.json");
+  let now = Date.UTC(2026, 7, 23, 12, 0, 0);
+  const timerOptions = { setIntervalFn: () => 1, clearIntervalFn: () => {} };
+
+  const first = new FleetEnergyTracker({ filePath, load: false, now: () => now, ...timerOptions });
+  first.record(fleetSnapshots(100), now);
+  first.record(fleetSnapshots(100), now + 2_000);
+  const totalAfter2s = first.snapshot(now + 2_000).energyTotalKwh;
+  assert.ok(totalAfter2s > 0, "cumulative total accumulates");
+  // Advancing the clock beyond the retention window prunes buckets, but the
+  // cumulative lifetime total must NOT shrink (it is independent of pruning).
+  const pruned = first.snapshot(now + 32 * DAY_MS);
+  assert.equal(pruned.energyTotalKwh, totalAfter2s, "total survives bucket pruning");
+  assert.equal(pruned.energy24hKwh, null, "24h window is empty after pruning");
+  first.flush();
+
+  const second = new FleetEnergyTracker({ filePath, now: () => now + 32 * DAY_MS, ...timerOptions });
+  const reloaded = second.snapshot(now + 32 * DAY_MS);
+  assert.equal(reloaded.energyTotalKwh, totalAfter2s, "total survives reload");
 });
 
 test("fleet-energy membership changes invalidate aggregates until restart", () => {
@@ -1306,7 +1385,7 @@ test("reload marks pruned persisted buckets dirty so close durably removes them"
     JSON.stringify({
       version: 1,
       nodeIds: CANONICAL_NODE_IDS,
-      buckets: [bucket(now - 31 * DAY_MS - MINUTE_MS), bucket(now)],
+      buckets: [bucket(now - 2 * 31 * DAY_MS - MINUTE_MS), bucket(now)],
     })
   );
   const tracker = new FleetEnergyTracker({
@@ -1614,13 +1693,13 @@ test("persistence uses mode 0600 and auto-flush cadence is capped at 30 seconds"
   assert.equal(cleared, true);
 });
 
-test("retention is bounded to 44,640 completed minute buckets plus the active minute", (t) => {
+test("retention is bounded to 89,280 completed minute buckets plus the active minute", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sparkdash-energy-retention-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const filePath = path.join(dir, "fleet-energy.json");
   const start = Date.UTC(2026, 6, 1, 0, 0, 0);
   let now = start;
-  const completedBuckets = 44_640;
+  const completedBuckets = 89_280;
   const tracker = new FleetEnergyTracker({
     filePath,
     load: false,
@@ -1659,7 +1738,7 @@ test("bucket pruning remains correct after a backward clock inserts an older min
   tracker.record([nodeSnapshot("node-a")], 0);
   tracker.record([nodeSnapshot("node-a")], 2_000);
 
-  now = 31 * DAY_MS + 20 * MINUTE_MS;
+  now = 2 * 31 * DAY_MS + 20 * MINUTE_MS;
   tracker.snapshot(now);
   tracker.flush();
   const saved = JSON.parse(fs.readFileSync(filePath, "utf8"));

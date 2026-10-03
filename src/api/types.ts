@@ -561,6 +561,15 @@ export interface FleetEnergy {
   currentWatts30s: number | null;
   energy24hKwh: number | null;
   energy31dKwh: number | null;
+  energyTodayKwh: number | null;
+  energyThisMonthKwh: number | null;
+  energyLastMonthKwh: number | null;
+  /** Monotonic lifetime fleet energy (kWh), never decremented. */
+  energyTotalKwh: number | null;
+  /** Local-timezone calendar period boundaries (epoch ms). */
+  periodDayStartMs?: number;
+  periodMonthStartMs?: number;
+  periodLastMonthStartMs?: number;
   whPerOutputToken24h: number | null;
   outputTokens24h: number;
   coverage24hMs: number;
@@ -576,6 +585,12 @@ export interface FleetEnergy {
   /** Estimated cost over the last 24h / 31d at the configured price. */
   cost24hEuros?: number | null;
   cost31dEuros?: number | null;
+  /** Estimated cost over the calendar day / month / last month at the configured price. */
+  costTodayEuros?: number | null;
+  costThisMonthEuros?: number | null;
+  costLastMonthEuros?: number | null;
+  /** Estimated lifetime cost (all time) at the configured price. Monotonic. */
+  costTotalEuros?: number | null;
 }
 
 export interface LiteLlmKey {
