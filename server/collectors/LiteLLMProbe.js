@@ -13,10 +13,12 @@
  * LITELLM_PROBE_KEY), never written to a config file or repo. The probe only
  * ever returns labels + token counts + spend, never the keys themselves.
  *
- * Endpoints used (both require the master key as Bearer):
- *   GET /spend/logs?start_date=..&end_date=..&summarize=true  -> rows keyed by
- *        hashed `api_key` with prompt/completion/total_tokens + spend
- *   GET /key/info  -> key list with `metadata` (friendly label) + per-key spend
+ * Endpoints used (all require the master key as Bearer):
+ *   GET /spend/logs?summarize=true  -> rows keyed by hashed `api_key` with
+ *        prompt/completion/total_tokens + spend (no date filters; this LiteLLM
+ *        returns 0 rows when start_date/end_date are passed)
+ *   GET /key/list                  -> hashed key ids
+ *   GET /key/info?key=<hash>        -> per-key `key_alias` (friendly label) + spend
  */
 import { createHash } from "node:crypto";
 
@@ -103,13 +105,12 @@ export class LiteLLMProbe {
       return this.keys;
     }
     try {
-      // 1) per-key token counts from spend logs (aggregated, today)
-      const now = new Date();
-      const start = new Date(now.getTime() - 24 * 3600 * 1000);
-      const fmt = (d) => d.toISOString().slice(0, 19).replace("T", " ");
-      const spendRows = await this._get(
-        `/spend/logs?start_date=${encodeURIComponent(fmt(start))}&end_date=${encodeURIComponent(fmt(now))}&summarize=true`
-      );
+      // 1) per-key token counts from spend logs (aggregated). NOTE: this
+      //    LiteLLM version returns 0 rows whenever start_date/end_date are
+      //    passed (timezone/filter bug) and 500s on a datetime, so omit the
+      //    filters and take all rows. Home-lab: few rows; add pagination if the
+      //    spend table grows large.
+      const spendRows = await this._get(`/spend/logs?summarize=true`);
       const agg = new Map(); // keyHash -> {prompt,completion,total,spend}
       const rows = Array.isArray(spendRows) ? spendRows : spendRows?.data || [];
       for (const row of rows) {
@@ -123,31 +124,37 @@ export class LiteLLMProbe {
         agg.set(kh, cur);
       }
 
-      // 2) friendly labels + per-key spend from /key/info (list)
-      const keyInfoResp = await this._get("/key/info");
-      const keyList = Array.isArray(keyInfoResp)
-        ? keyInfoResp
-        : keyInfoResp?.data || keyInfoResp?.keys || [];
-      for (const k of keyList) {
-        const kh = k?.token ? this.hashKey(k.token) : k?.key_hash;
-        if (!kh) continue;
+      // 2) friendly labels + per-key spend. This LiteLLM has no list /key/info,
+      //    so enumerate hashes via /key/list and look up each with
+      //    /key/info?key=<hash> to read key_alias for the label. Only a few keys.
+      const keyListResp = await this._get("/key/list");
+      const hashes = Array.isArray(keyListResp) ? keyListResp : keyListResp?.keys || [];
+      const keyList = [];
+      for (const kh of hashes) {
+        let info = {};
+        try {
+          info = (await this._get(`/key/info?key=${encodeURIComponent(kh)}`))?.info || {};
+        } catch {
+          // ignore per-key lookup errors; the hash still contributes spend rows
+        }
+        keyList.push({ ...info, key_hash: kh });
         const cur = agg.get(kh) || { promptTokens: 0, completionTokens: 0, totalTokens: 0, spend: 0 };
-        cur.spend = Number(k.spend ?? cur.spend);
-        // /spend/logs returns hashed api_key; /key/info may return a raw token.
-        // Store label on a separate map keyed by the SAME hash if possible.
+        cur.spend = Number(info.spend ?? cur.spend);
         agg.set(kh, cur);
       }
 
-      // 3) build labelled rows. Match labels to spend rows by hash where we can;
-      //    /key/info without a raw token is matched by hash only if it carries one.
+      // 3) build labelled rows. Match labels to spend rows by hash where we can.
       this.keys = [];
-      // attach labels: iterate keyList again, tracking token->hash so we can label
       const labelByHash = new Map();
       for (const k of keyList) {
-        const kh = k?.token ? this.hashKey(k.token) : k?.key_hash;
+        const kh = k?.key_hash;
         if (kh) labelByHash.set(kh, LiteLLMProbe.labelFor(k));
       }
+      // Only surface hashes that correspond to a live key (skip stale spend
+      // rows from re-minted/removed keys, otherwise they appear as unlabeled).
+      const liveHashes = new Set(labelByHash.keys());
       for (const [kh, v] of agg) {
+        if (!liveHashes.has(kh)) continue;
         const label = labelByHash.get(kh) || "unlabeled";
         // Hypothetical cost if the same tokens were billed at reference MSRP.
         const m = msrpFor();
