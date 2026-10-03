@@ -54,9 +54,9 @@ test("LiteLLMProbe aggregates per-key tokens and labels from metadata", async ()
   assert.equal(keys[0].label, "bill laptop");
   assert.equal(keys[0].totalTokens, 400);
 
-  // Hypothetical cost at reference MSRP (default Opus 4-8 1M: $15/$75 per M).
-  // labeled: 300 prompt * 15 + 100 completion * 75 = (4500 + 7500)/1e6 = 0.012
-  assert.ok(Math.abs(labeled.costAtMsrp - 0.012) < 1e-9, "costAtMsrp for labeled");
+  // Hypothetical cost at reference MSRP (Opus 4-8 1M: $5/$25 per M).
+  // labeled: 300 prompt * 5 + 100 completion * 25 = (1500 + 2500)/1e6 = 0.004
+  assert.ok(Math.abs(labeled.costAtMsrp - 0.004) < 1e-9, "costAtMsrp for labeled");
   assert.equal(labeled.model, "claude-opus-4-8-1m");
 
   assert.equal(probe.error, null);

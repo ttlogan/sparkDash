@@ -633,6 +633,11 @@ test("integration splits energy and coverage at UTC minute boundaries", (t) => {
     load: false,
     setIntervalFn: () => 1,
     clearIntervalFn: () => {},
+    // Pin the clock just past the recorded buckets so the 31-day retention
+    // prune in flush()/record() cannot drop them. Without this the test relies
+    // on Aug 2026 still being within RETENTION_MS of real Date.now() and flakes
+    // once the date slips out of that window.
+    now: () => minute + 2 * MINUTE_MS,
   });
 
   tracker.record([nodeSnapshot("node-a", { watts: 100 })], minute + 59_000);

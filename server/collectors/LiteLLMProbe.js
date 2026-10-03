@@ -29,9 +29,9 @@ const DEFAULT_POLL_MS = 30000; // spend logs are slow-ish; don't hammer
 // Reference MSRP in USD per 1M tokens (input / output). Used to show what the
 // same token volume would cost on a paid frontier model, so the dashboard can
 // express the value of running it locally for free.
-// Claude Opus 4-8 (1M ctx) at MSRP: $15/M input, $75/M output. Configurable via
-// env so you can compare against any plan.
-const DEFAULT_MSRP = { inputPerM: 15, outputPerM: 75, model: "claude-opus-4-8-1m" };
+// Claude Opus 4-8 (1M ctx) at MSRP: $5/M input, $25/M output (no long-context
+// surcharge). Configurable via env so you can compare against any plan.
+const DEFAULT_MSRP = { inputPerM: 5, outputPerM: 25, model: "claude-opus-4-8-1m" };
 
 export function msrpFor(model = "") {
   // Read env override "name:inPerM:outPerM" e.g. claude-sonnet:3:15
