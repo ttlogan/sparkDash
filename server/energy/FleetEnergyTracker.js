@@ -560,6 +560,15 @@ export class FleetEnergyTracker {
     };
   }
 
+  /** Total fleet energy (Wh) across every retained bucket, regardless of window. */
+  _sumBucketWh() {
+    let totalWh = 0;
+    for (const bucket of this._buckets.values()) {
+      totalWh += Object.values(bucket.nodeWh).reduce((sum, value) => sum + value, 0);
+    }
+    return totalWh;
+  }
+
   _hourly(atMs) {
     const graphEnd = Math.floor(atMs / MINUTE_MS) * MINUTE_MS;
     const graphStart = graphEnd - DAY_MS;
@@ -815,7 +824,20 @@ export class FleetEnergyTracker {
       if (validNonnegative(cumulativeWh) && Number.isFinite(cumulativeWh)) {
         this._fleetEnergyWhCumulative = cumulativeWh;
       }
-      this._dirty = legacyNodeIds || rejectedBucket || repairedHighWater;
+      // Backfill: a legacy/deployed file may lack, or under-accumulate, the
+      // lifetime total (it only grows from integrations made after the feature
+      // landed). Seed it to at least the energy already retained in buckets so
+      // "cost to date" reflects all recorded history on first load.
+      const retainedWh = this._sumBucketWh();
+      const seededCumulative = retainedWh > this._fleetEnergyWhCumulative;
+      if (seededCumulative) {
+        this._fleetEnergyWhCumulative = retainedWh;
+      }
+      this._dirty =
+        legacyNodeIds ||
+        rejectedBucket ||
+        repairedHighWater ||
+        seededCumulative;
       const now = this._now();
       if (Number.isFinite(now)) this._prune(now);
     } catch (error) {
