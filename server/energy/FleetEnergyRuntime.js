@@ -69,9 +69,29 @@ export function runFleetEnergySamplerTick({
   return tracker.record(trackerInputs, atMs);
 }
 
+/** Default electricity price per kWh (EUR) — Naples, Italy retail average.
+ *  Override with ELECTRICITY_PRICE_PER_KWH in the service env. */
+const DEFAULT_ELECTRICITY_PRICE_PER_KWH = 0.30;
+
+function electricityPricePerKwh() {
+  const value = Number(process.env.ELECTRICITY_PRICE_PER_KWH);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_ELECTRICITY_PRICE_PER_KWH;
+}
+
 /** Build the read-only Express handler around the tracker's canonical contract. */
 export function createFleetEnergyHandler(tracker) {
-  return (_req, res) => res.json(tracker.snapshot());
+  return (_req, res) => {
+    const snapshot = tracker.snapshot();
+    const pricePerKwh = electricityPricePerKwh();
+    return res.json({
+      ...snapshot,
+      electricityPricePerKwh: pricePerKwh,
+      cost24hEuros:
+        snapshot.energy24hKwh == null ? null : snapshot.energy24hKwh * pricePerKwh,
+      cost31dEuros:
+        snapshot.energy31dKwh == null ? null : snapshot.energy31dKwh * pricePerKwh,
+    });
+  };
 }
 
 /** Register the read-only fleet-energy endpoint. */

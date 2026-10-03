@@ -51,11 +51,17 @@ export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
         <span className="text-xs text-muted">{data ? `${data.freshNodeCount}/${nodeCount} fresh` : "—"}</span>
       </div>
       {state && <p className="mt-3 rounded bg-warning/10 px-3 py-2 text-xs text-warning" role="status">{state}</p>}
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div><div className="text-[10px] text-muted">Current</div><strong className="font-tabular text-sm">{number(data?.currentWatts30s ?? null, 0)} W</strong></div>
         <div><div className="text-[10px] text-muted">24 hours</div><strong className="font-tabular text-sm">{number(data?.energy24hKwh ?? null)} kWh</strong></div>
         <div><div className="text-[10px] text-muted">31 days</div><strong className="font-tabular text-sm">{number(data?.energy31dKwh ?? null)} kWh</strong></div>
         <div><div className="text-[10px] text-muted">Efficiency</div><strong className="font-tabular text-sm">{number(data?.whPerOutputToken24h ?? null, 4)} Wh/token</strong></div>
+        <div>
+          <div className="text-[10px] text-muted">Cost to date</div>
+          <strong className="font-tabular text-sm">
+            {data?.cost31dEuros != null ? `€${number(data.cost31dEuros)}` : data?.cost24hEuros != null ? `€${number(data.cost24hEuros)}` : "—"}
+          </strong>
+        </div>
       </div>
       <div className="mt-3 flex h-12 items-end gap-px" aria-label="Hourly estimated watts for the last 24 hours, with gaps shown empty">
         {(data?.hourlyWatts24h ?? Array(24).fill(null)).map((watts, index, values) => {

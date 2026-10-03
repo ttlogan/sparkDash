@@ -382,7 +382,9 @@ simultaneous telemetry from every node; coverage fields make gaps explicit. Minu
 persisted at mode `0600` for rolling 24-hour and 31-day windows. Wh/output-token is reported when
 exactly one configured node has role `head` and exposes a monotonic LLM output-token counter.
 These values are estimates, not wall-meter measurements. Restart sparkDash after changing fleet
-membership so the persisted series has one stable node set.
+membership so the persisted series has one stable node set. The response also carries
+`electricityPricePerKwh` and estimated `cost24hEuros` / `cost31dEuros` (kWh × price), so the
+Overview card can show running cost without a separate setting.
 
 ---
 
@@ -432,6 +434,7 @@ Copy `.env.example` to `.env` if needed:
 | `SSH_IDENTITY_FILE` | _(unset)_ | Path **inside the process** to a private key (`ssh -i`). Use when the bind-mount is not a default OpenSSH name. |
 | `SSH_CONTROL_PERSIST_SECONDS` | `60` | Idle SSH transport persistence in seconds, capped at `3600`. Set to `0` to disable multiplexing. |
 | `FLEET_ENERGY_JSON_PATH` | `config/fleet-energy.json` | Rolling fleet-energy persistence path |
+| `ELECTRICITY_PRICE_PER_KWH` | `0.30` | EUR/kWh used to estimate fleet energy cost (default: Naples, Italy retail average). Override to match your tariff. |
 
 For compatibility, `SSH_CONTROL_PERSIST` is accepted as a seconds-based fallback when `SSH_CONTROL_PERSIST_SECONDS` is unset. The existing `SSH_MULTIPLEX=0` switch also disables reuse. SSH tunnels always use an independent connection.
 
