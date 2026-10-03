@@ -6,8 +6,12 @@ const FILE_VERSION = 1;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
+// Rolling 31-day window used by the "31 days" card and its cost.
 const RETENTION_MS = 31 * DAY_MS;
-const MAX_COMPLETED_BUCKETS = 44_640;
+// Retain ~2 months of minute buckets so the current and previous calendar month
+// are both available for the daily / monthly / last-month cost view.
+const HISTORY_MS = 2 * 31 * DAY_MS;
+const MAX_COMPLETED_BUCKETS = 2 * 44_640;
 const MAX_GAP_MS = 10_000;
 const CURRENT_WINDOW_MS = 30_000;
 const DEFAULT_FLUSH_INTERVAL_MS = 30_000;
@@ -25,6 +29,19 @@ function clamp(value, minimum, maximum) {
 // exact leading edge, limiting approximation error to less than one minute.
 function alignedWindowCutoff(atMs, windowMs) {
   return Math.floor((atMs - windowMs) / MINUTE_MS) * MINUTE_MS;
+}
+
+// Local-timezone calendar boundary (midnight at the start of a day / month).
+// Buckets are stored as UTC-epoch minute starts, so we derive the local
+// instant by interpreting `atMs` through the local Date methods.
+function localDayStartMs(atMs) {
+  const date = new Date(atMs);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function localMonthStartMs(atMs) {
+  const date = new Date(atMs);
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
 }
 
 function normalizeNodeIds(nodeIds) {
@@ -239,6 +256,9 @@ export class FleetEnergyTracker {
     this._nodeBaselines = new Map();
     this._fleetBaseline = null;
     this._integrationHighWaterMs = null;
+    // Lifetime fleet energy (Wh) accumulated across every integrated interval.
+    // Monotonic; survives bucket pruning so "cost to date" is a true total.
+    this._fleetEnergyWhCumulative = 0;
     this._tokenCounter = null;
     this._tokenNeedsRebase = false;
     this._recentFullFleetSamples = [];
@@ -340,6 +360,8 @@ export class FleetEnergyTracker {
       (bucket, durationMs, averageWatts) => {
         bucket.fleetWattMs += averageWatts * durationMs;
         bucket.fleetCoverageMs += durationMs;
+        // Accumulate the lifetime total in Wh; never decremented.
+        this._fleetEnergyWhCumulative += (averageWatts * durationMs) / 3_600_000;
       }
     );
   }
@@ -392,7 +414,7 @@ export class FleetEnergyTracker {
       this._bucketsOrdered = true;
       this._latestBucketStart = [...this._buckets.keys()].at(-1) ?? null;
     }
-    const cutoff = alignedWindowCutoff(atMs, RETENTION_MS);
+    const cutoff = alignedWindowCutoff(atMs, HISTORY_MS);
     let changed = false;
     for (const minuteStartMs of this._buckets.keys()) {
       if (minuteStartMs >= cutoff) break;
@@ -501,6 +523,11 @@ export class FleetEnergyTracker {
 
   _window(atMs, windowMs) {
     const cutoff = alignedWindowCutoff(atMs, windowMs);
+    return this._sumWindow(cutoff, atMs);
+  }
+
+  /** Sum the minute buckets whose start is in [startMs, endMs). */
+  _sumWindow(startMs, endMs) {
     const nodeWh = nodeValues(this.nodeIds);
     const nodeCoverageMs = nodeValues(this.nodeIds);
     let fleetCoverageMs = 0;
@@ -509,7 +536,7 @@ export class FleetEnergyTracker {
     let coveredOutputTokens = 0;
 
     for (const bucket of this._buckets.values()) {
-      if (bucket.minuteStartMs < cutoff || bucket.minuteStartMs > atMs) continue;
+      if (bucket.minuteStartMs < startMs || bucket.minuteStartMs > endMs) continue;
       for (const id of this.nodeIds) {
         nodeWh[id] += bucket.nodeWh[id];
         nodeCoverageMs[id] += bucket.nodeCoverageMs[id];
@@ -562,6 +589,14 @@ export class FleetEnergyTracker {
     this._prune(safeTimestamp);
     const last24h = this._window(safeTimestamp, DAY_MS);
     const last31d = this._window(safeTimestamp, RETENTION_MS);
+    // Calendar periods (local timezone): today and this month run up to now;
+    // last month is a sealed prior-period total, unaffected by current time.
+    const dayStartMs = localDayStartMs(safeTimestamp);
+    const monthStartMs = localMonthStartMs(safeTimestamp);
+    const lastMonthStartMs = localMonthStartMs(monthStartMs - 1);
+    const today = this._sumWindow(dayStartMs, safeTimestamp);
+    const thisMonth = this._sumWindow(monthStartMs, safeTimestamp);
+    const lastMonth = this._sumWindow(lastMonthStartMs, monthStartMs);
     const sampleCount = this._recentFullFleetSamples.length;
     const currentWatts30s = sampleCount > 0
       ? this._recentFullFleetSamples.reduce((sum, sample) => sum + sample.watts, 0) / sampleCount
@@ -585,6 +620,18 @@ export class FleetEnergyTracker {
         !this._membershipChanged && last24h.hasObservedEnergy ? last24h.energyWh / 1000 : null,
       energy31dKwh:
         !this._membershipChanged && last31d.hasObservedEnergy ? last31d.energyWh / 1000 : null,
+      energyTodayKwh:
+        !this._membershipChanged && today.hasObservedEnergy ? today.energyWh / 1000 : null,
+      energyThisMonthKwh:
+        !this._membershipChanged && thisMonth.hasObservedEnergy ? thisMonth.energyWh / 1000 : null,
+      energyLastMonthKwh:
+        !this._membershipChanged && lastMonth.hasObservedEnergy ? lastMonth.energyWh / 1000 : null,
+      /** Monotonic lifetime fleet energy (kWh), never decremented. */
+      energyTotalKwh: this._membershipChanged ? null : this._fleetEnergyWhCumulative / 1000,
+      /** Local-timezone calendar period boundaries (epoch ms) for the client. */
+      periodDayStartMs: dayStartMs,
+      periodMonthStartMs: monthStartMs,
+      periodLastMonthStartMs: lastMonthStartMs,
       whPerOutputToken24h:
         !this._membershipChanged && last24h.fleetEnergyWh > 0 && last24h.coveredOutputTokens > 0
           ? last24h.fleetEnergyWh / last24h.coveredOutputTokens
@@ -764,6 +811,10 @@ export class FleetEnergyTracker {
         };
         this._tokenNeedsRebase = true;
       }
+      const cumulativeWh = raw.fleetEnergyWhCumulative;
+      if (validNonnegative(cumulativeWh) && Number.isFinite(cumulativeWh)) {
+        this._fleetEnergyWhCumulative = cumulativeWh;
+      }
       this._dirty = legacyNodeIds || rejectedBucket || repairedHighWater;
       const now = this._now();
       if (Number.isFinite(now)) this._prune(now);
@@ -788,6 +839,7 @@ export class FleetEnergyTracker {
         this._integrationHighWaterMs === null
           ? null
           : Math.ceil(this._integrationHighWaterMs),
+      fleetEnergyWhCumulative: this._fleetEnergyWhCumulative,
       tokenCounter: this._tokenCounter,
       buckets,
     };
