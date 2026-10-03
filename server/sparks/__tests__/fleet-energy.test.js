@@ -465,6 +465,43 @@ test("lifetime cumulative energy total is monotonic across pruning and reload", 
   assert.equal(reloaded.energyTotalKwh, totalAfter2s, "total survives reload");
 });
 
+test("lifetime cumulative is backfilled from retained buckets when the persisted total is missing or understated", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sparkdash-energy-backfill-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, "fleet-energy.json");
+  const now = Date.UTC(2026, 7, 23, 12, 0, 0);
+  const values = Object.fromEntries(CANONICAL_NODE_IDS.map((id) => [id, 0]));
+  // Three buckets each integrating 100 W/node * 4 nodes for a full minute.
+  const bucket = (minuteStartMs, whPerNode) => ({
+    minuteStartMs,
+    nodeWh: Object.fromEntries(CANONICAL_NODE_IDS.map((id) => [id, whPerNode])),
+    nodeCoverageMs: { ...values, ...Object.fromEntries(CANONICAL_NODE_IDS.map((id) => [id, MINUTE_MS])) },
+    fleetWattMs: 400 * MINUTE_MS,
+    fleetCoverageMs: MINUTE_MS,
+    outputTokens: 0,
+    coveredOutputTokens: 0,
+  });
+  // 3 completed minutes, each integrating a full minute at 100 W/node. The
+  // per-node floor (MIN_NODE_WATTS * 60s / 3.6e6 = 0.47 Wh) must be met so the
+  // buckets pass load validation.
+  const whPerNode = 1.667; // ~100 W * 60s -> 1.667 Wh/node/minute
+  const expectedTotalKwh = (3 * 4 * whPerNode) / 1000;
+  const legacyBuckets = [bucket(now - 3 * MINUTE_MS, whPerNode), bucket(now - 2 * MINUTE_MS, whPerNode), bucket(now - MINUTE_MS, whPerNode)];
+  // Legacy v1 file: NO cumulative field (feature not present at write time).
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, nodeIds: CANONICAL_NODE_IDS, integrationHighWaterMs: now, buckets: legacyBuckets }));
+
+  const timerOptions = { setIntervalFn: () => 1, clearIntervalFn: () => {} };
+  const tracker = new FleetEnergyTracker({ filePath, now: () => now, ...timerOptions });
+  const snapshot = tracker.snapshot(now);
+  // Backfill must seed the lifetime total to at least the retained buckets.
+  assert.ok(snapshot.energyTotalKwh > 0, "cumulative backfilled from buckets");
+  almostEqual(snapshot.energyTotalKwh, expectedTotalKwh, 1e-3, "seeded to sum of retained buckets");
+  // And it must persist so a reload keeps it.
+  tracker.close();
+  const reloaded = new FleetEnergyTracker({ filePath, now: () => now, ...timerOptions });
+  almostEqual(reloaded.snapshot(now).energyTotalKwh, snapshot.energyTotalKwh, 1e-3, "seed persisted across reload");
+});
+
 test("fleet-energy membership changes invalidate aggregates until restart", () => {
   const now = Date.UTC(2026, 7, 23, 12, 34, 0);
   const tracker = new FleetEnergyTracker({ ...noTimerOptions(), now: () => now });
