@@ -571,6 +571,11 @@ export interface FleetEnergy {
   nodeCoverage24hMs: Record<string, number>;
   nodeCoverage31dMs: Record<string, number>;
   hourlyWatts24h: Array<number | null>;
+  /** Electricity price per kWh (EUR) used to derive the cost figures below. */
+  electricityPricePerKwh?: number;
+  /** Estimated cost over the last 24h / 31d at the configured price. */
+  cost24hEuros?: number | null;
+  cost31dEuros?: number | null;
 }
 
 export interface LiteLlmKey {

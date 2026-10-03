@@ -8,6 +8,9 @@ import {
   FleetEnergyTracker as BaseFleetEnergyTracker,
   estimateNodeWatts,
 } from "../../energy/FleetEnergyTracker.js";
+import {
+  createFleetEnergyHandler,
+} from "../../energy/FleetEnergyRuntime.js";
 
 const fleetEnergyRuntime = await import("../../energy/FleetEnergyRuntime.js").catch(() => ({}));
 
@@ -186,6 +189,9 @@ const APPROVED_RESPONSE_FIELDS = [
   "nodeCoverage24hMs",
   "nodeCoverage31dMs",
   "hourlyWatts24h",
+  "electricityPricePerKwh",
+  "cost24hEuros",
+  "cost31dEuros",
 ];
 
 function assertNullableFiniteNumber(value) {
@@ -1658,4 +1664,42 @@ test("bucket pruning remains correct after a backward clock inserts an older min
   tracker.flush();
   const saved = JSON.parse(fs.readFileSync(filePath, "utf8"));
   assert.deepEqual(saved.buckets.map((bucket) => bucket.minuteStartMs), [30 * MINUTE_MS]);
+});
+
+test("createFleetEnergyHandler decorates the snapshot with price and cost", async () => {
+  let now = 5 * MINUTE_MS;
+  const tracker = new FleetEnergyTracker({
+    load: false,
+    now: () => now,
+    setIntervalFn: () => 1,
+    clearIntervalFn: () => {},
+  });
+  tracker.record([nodeSnapshot("node-a", { watts: 100 })], now);
+  now += 1_000;
+  tracker.record([nodeSnapshot("node-a", { watts: 100 })], now);
+
+  const prev = process.env.ELECTRICITY_PRICE_PER_KWH;
+  process.env.ELECTRICITY_PRICE_PER_KWH = "0.30";
+  const handler = createFleetEnergyHandler(tracker);
+  const req = {};
+  const res = { json: (body) => body };
+  const body = handler(req, res);
+
+  // energy31dKwh is tiny here (a couple of 1s intervals), but the price/cost
+  // must be present and consistent: cost = kwh * price.
+  assert.equal(body.electricityPricePerKwh, 0.30);
+  if (body.energy31dKwh != null) {
+    assert.ok(Math.abs(body.cost31dEuros - body.energy31dKwh * 0.30) < 1e-9);
+  }
+  if (body.energy24hKwh != null) {
+    assert.ok(Math.abs(body.cost24hEuros - body.energy24hKwh * 0.30) < 1e-9);
+  }
+
+  // Invalid/missing price falls back to the Naples default.
+  delete process.env.ELECTRICITY_PRICE_PER_KWH;
+  const bodyDefault = handler(req, res);
+  assert.equal(bodyDefault.electricityPricePerKwh, 0.30);
+
+  if (prev === undefined) delete process.env.ELECTRICITY_PRICE_PER_KWH;
+  else process.env.ELECTRICITY_PRICE_PER_KWH = prev;
 });

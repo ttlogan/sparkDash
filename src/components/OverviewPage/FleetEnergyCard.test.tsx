@@ -31,6 +31,9 @@ function energy(overrides: Partial<FleetEnergy> = {}): FleetEnergy {
     nodeCoverage24hMs: {},
     nodeCoverage31dMs: {},
     hourlyWatts24h: Array.from({ length: 24 }, (_, hour) => (hour % 4 === 0 ? null : 100 + hour)),
+    electricityPricePerKwh: 0.3,
+    cost24hEuros: 1.5 * 0.3,
+    cost31dEuros: 40 * 0.3,
     ...overrides,
   };
 }
@@ -46,6 +49,9 @@ describe("FleetEnergyCard states", () => {
     expect(container.textContent).toContain("24h coverage 100.0%");
     expect(container.textContent).toContain("240 W");
     expect(container.textContent).toContain("0.0123 Wh/token");
+    // Cost to date uses the longest available window (31d) at the configured price.
+    expect(container.textContent).toContain("Cost to date");
+    expect(container.textContent).toContain("€12.00");
     const bars = [...container.querySelectorAll("[aria-label] span")];
     expect(bars.filter((bar) => (bar as HTMLElement).style.height === "0px" || (bar as HTMLElement).style.height === "0")).toHaveLength(6);
   });
