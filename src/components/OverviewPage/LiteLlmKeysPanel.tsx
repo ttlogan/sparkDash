@@ -38,6 +38,9 @@ export function LiteLlmKeysPanel() {
   }, []);
 
   const keys = data?.keys ?? [];
+  const totalCostAtMsrp = keys.reduce((s, k) => s + (k.costAtMsrp ?? 0), 0);
+  const totalTokens = keys.reduce((s, k) => s + (k.totalTokens ?? 0), 0);
+  const totalSpend = keys.reduce((s, k) => s + (k.spend ?? 0), 0);
   const state = error
     ? `LiteLLM usage unavailable: ${error}`
     : data && !data.enabled
@@ -94,6 +97,19 @@ export function LiteLlmKeysPanel() {
                 </tr>
               ))}
             </tbody>
+            <tfoot className="border-t-2 border-accent/40">
+              <tr className="text-accent">
+                <td className="py-1.5 pr-3 font-semibold text-[13px]">Total</td>
+                <td className="py-1.5 pr-3" />
+                <td className="py-1.5 pr-3 text-right font-tabular text-[13px]" />
+                <td className="py-1.5 pr-3 text-right font-tabular text-[13px]" />
+                <td className="py-1.5 pr-3 text-right font-tabular text-[13px]">{num(totalTokens, 0)}</td>
+                <td className="py-1.5 pr-3 text-right font-tabular text-[13px]">{num(totalSpend)}</td>
+                <td className="py-1.5 text-right font-tabular font-semibold text-[15px]">
+                  ${num(totalCostAtMsrp)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
