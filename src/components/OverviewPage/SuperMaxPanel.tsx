@@ -131,7 +131,7 @@ export function SuperMaxPanel() {
               <div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-text-strong">
-                    {finished
+                    {finished && !rendering
                       ? "Render complete"
                       : rendering
                         ? `Rendering ${beatLabel(render.currentBeat)}`
