@@ -1664,7 +1664,10 @@ let _lastBroadcastPayload = null;
 function buildSnapshotPayload() {
   return JSON.stringify({
     type: "snapshot",
-    generatedAt: Date.now(),
+    // No generatedAt: including Date.now() makes the serialized payload differ
+    // every tick, defeating the unchanged-snapshot skip below and re-serializing
+    // + re-broadcasting the whole snapshot every poll. Client falls back to its
+    // own receivedAt timestamp when this is absent.
     sparks: orderedSnapshots(),
     refreshInterval: getSettings().pollIntervalMs,
   });
