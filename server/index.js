@@ -34,6 +34,7 @@ import {
 import { showcaseManager } from "./collectors/ShowcaseManager.js";
 import { llmProbeHost } from "./collectors/llmHost.js";
 import { LiteLLMProbe } from "./collectors/LiteLLMProbe.js";
+import { SuperMaxStatusProbe } from "./collectors/SuperMaxStatusProbe.js";
 import { onceClose, resolveLlmHttpTarget } from "./collectors/llmTunnel.js";
 import { formatLlmBaseUrl, parseLlmTargetInput } from "../src/shared/llmTarget.js";
 import { llmDaily } from "./collectors/LlmDaily.js";
@@ -350,6 +351,20 @@ app.get("/api/litellm/keys", async (_req, res) => {
     res.json({ enabled: probe.enabled, error: probe.error, model: keys[0]?.model || null, keys });
   } catch (e) {
     res.status(500).json({ enabled: false, error: e.message, keys: [] });
+  }
+});
+
+// Lightweight Super Max render + publish status (the "Ted" fork addition).
+// Reads the render box's nginx-served render_status.json + the live site's
+// baked-in publish date. Both URLs come from env (SUPERMAX_RENDER_URL /
+// SUPERMAX_SITE_URL), never a config file or repo.
+app.get("/api/supermax/status", async (_req, res) => {
+  try {
+    const probe = new SuperMaxStatusProbe();
+    const status = await probe.poll();
+    res.json({ enabled: probe.enabled, error: probe.error, ...status });
+  } catch (e) {
+    res.status(500).json({ enabled: false, error: e.message, render: null, publishDate: null });
   }
 });
 
@@ -1649,7 +1664,10 @@ let _lastBroadcastPayload = null;
 function buildSnapshotPayload() {
   return JSON.stringify({
     type: "snapshot",
-    generatedAt: Date.now(),
+    // No generatedAt: including Date.now() makes the serialized payload differ
+    // every tick, defeating the unchanged-snapshot skip below and re-serializing
+    // + re-broadcasting the whole snapshot every poll. Client falls back to its
+    // own receivedAt timestamp when this is absent.
     sparks: orderedSnapshots(),
     refreshInterval: getSettings().pollIntervalMs,
   });

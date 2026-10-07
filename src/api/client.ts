@@ -18,6 +18,7 @@ import type {
   PrefillBenchJob,
   PrefillBenchListResponse,
   StartPrefillBenchRequest,
+  SuperMaxStatus,
 } from "./types";
 
 const BASE = "/sparkdash";
@@ -57,6 +58,11 @@ export function fetchFleetEnergy(): Promise<FleetEnergy> {
 /** Per-key LiteLLM usage (labels, tokens, spend, cost-at-MSRP). */
 export function fetchLiteLlmKeys(): Promise<LiteLlmKeysResponse> {
   return apiFetch("/api/litellm/keys");
+}
+
+/** Super Max render + publish status (the "Ted" fork addition). */
+export function fetchSuperMaxStatus(): Promise<SuperMaxStatus> {
+  return apiFetch("/api/supermax/status");
 }
 
 /** Latest metrics snapshot for one Spark (includes per-port LLM modelId). */

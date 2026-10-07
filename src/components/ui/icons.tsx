@@ -94,6 +94,24 @@ export function ComfyIcon({ className }: IconProps) {
   );
 }
 
+export function WindowsIcon({ className }: IconProps) {
+  return (
+    <svg {...baseProps(className)}>
+      <path d="M3 5.5L10 4.4v7.1H3zM11 4.2L21 3v8.5H11zM3 11.5h7v7.1l-7-1.1zM11 11.5h10V21l-10-1.2z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function TuxIcon({ className }: IconProps) {
+  return (
+    <svg {...baseProps(className)} fill="currentColor" stroke="none">
+      <path d="M12 3c-1.7 0-3 1.5-3 3.4 0 1.1-.6 2-1.5 2.9C6.4 10.3 6 11.7 6 13.4c0 .6.1 1.2.3 1.7-1.3.2-2.3.6-2.3 1.3 0 .8 1.1 1.4 2.7 1.7A6 6 0 0 0 12 21a6 6 0 0 0 5.3-2.9c1.6-.3 2.7-.9 2.7-1.7 0-.7-1-1.1-2.3-1.3.2-.5.3-1.1.3-1.7 0-1.7-.4-2.9-1.5-3.9-.9-.9-1.5-1.8-1.5-2.9C15 4.5 13.7 3 12 3zm0 2c.8 0 1.5 1 1.5 1.4 0 .3-.2.3-.5.3.4.8 1.2 1.2 1.5 1.5-.3.3-1.2.1-1.6 1-.5.9-1.9.9-2.4 0-.4-.9-1.3-.7-1.6-1 .3-.3 1.1-.7 1.5-1.5-.3 0-.5 0-.5-.3C10.5 6 11.2 5 12 5z" />
+      <circle cx="10.4" cy="9.1" r=".4" fill="#fff" />
+      <circle cx="13.6" cy="9.1" r=".4" fill="#fff" />
+    </svg>
+  );
+}
+
 export function GearIcon({ className = "" }: { className?: string }) {
   return (
     <svg {...baseProps(className)}>
