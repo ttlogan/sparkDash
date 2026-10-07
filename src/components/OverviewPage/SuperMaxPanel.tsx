@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchSuperMaxStatus } from "../../api/client";
-import type { SuperMaxStatus } from "../../api/types";
+import type { SuperMaxStatus, SuperMaxRenderHost } from "../../api/types";
+import { WindowsIcon, TuxIcon } from "../ui/icons";
 
 /** Format an ISO 8601 publish date into a compact relative string. */
 function publishLabel(iso: string | null | undefined): string {
@@ -21,6 +22,30 @@ function publishLabel(iso: string | null | undefined): string {
 function beatLabel(beat: string | null | undefined): string {
   if (!beat) return "—";
   return beat.replace(/-/g, " · ");
+}
+
+/** Map the active render host to an OS icon + label. The render box dual-boots
+ *  (Windows vs Linux); the probe reports which host is up plus its os type.
+ *  The hostname/label comes from runtime env config, not the repo. */
+function renderHostRow(host: SuperMaxRenderHost | null | undefined) {
+  if (!host) {
+    return (
+      <p className="text-xs text-muted" role="status">
+        No Render Host Active
+      </p>
+    );
+  }
+  const isWindows = host.os === "windows";
+  const icon = isWindows ? <WindowsIcon className="h-5 w-5" /> : <TuxIcon className="h-5 w-5" />;
+  const name = host.label || "render host";
+  // renderer mapping: Linux/natureboy runs ComfyUI; Windows/silverback runs sd1111 (A1111)
+  const acc = isWindows ? "sd 1111" : "ComfyUI";
+  return (
+    <p className="flex items-center gap-2 text-xs text-text-strong">
+      <span className="shrink-0 text-accent">{icon}</span>
+      {name} is active ({acc})
+    </p>
+  );
 }
 
 export function SuperMaxPanel() {
@@ -52,6 +77,7 @@ export function SuperMaxPanel() {
   const rendering = Boolean(render?.rendering);
   const completed = render?.completed ?? 0;
   const total = render?.total ?? 9;
+  const finished = total > 0 && completed >= total;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   const publish = data?.publishDate;
 
@@ -76,6 +102,10 @@ export function SuperMaxPanel() {
           <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
             Rendering
           </span>
+        ) : finished ? (
+          <span className="rounded bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success">
+            Complete
+          </span>
         ) : (
           <span className="rounded bg-muted/15 px-2 py-0.5 text-[10px] font-semibold text-muted">
             Idle
@@ -91,6 +121,7 @@ export function SuperMaxPanel() {
 
       {data?.enabled && (
         <div className="mt-3 space-y-3">
+          {renderHostRow(data.renderHost)}
           {data.renderError || data.publishError ? (
             <p className="text-xs text-muted" role="status">
               {data.renderError || data.publishError}
@@ -100,7 +131,11 @@ export function SuperMaxPanel() {
               <div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-text-strong">
-                    {rendering ? `Rendering ${beatLabel(render.currentBeat)}` : "Render complete"}
+                    {finished
+                      ? "Render complete"
+                      : rendering
+                        ? `Rendering ${beatLabel(render.currentBeat)}`
+                        : "Render pending"}
                   </span>
                   <span className="font-tabular text-muted">
                     {completed}/{total} · {pct}%

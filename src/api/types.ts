@@ -565,6 +565,12 @@ export interface SuperMaxRender {
   queue?: number;
 }
 
+export interface SuperMaxRenderHost {
+  host: string;
+  label: string;
+  os?: string;
+}
+
 export interface SuperMaxStatus {
   enabled: boolean;
   error?: string | null;
@@ -572,6 +578,7 @@ export interface SuperMaxStatus {
   renderError?: string | null;
   publishDate?: string | null;
   publishError?: string | null;
+  renderHost?: SuperMaxRenderHost | null;
 }
 
 export interface FleetEnergy {

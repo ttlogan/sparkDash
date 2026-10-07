@@ -18,7 +18,7 @@ test("SuperMaxStatusProbe parses render status + publish date from fetch stubs",
         }),
       };
     }
-    if (u.startsWith("https://supermax.quest")) {
+    if (u.startsWith("https://example-site.test")) {
       return {
         ok: true,
         status: 200,
@@ -30,8 +30,8 @@ test("SuperMaxStatusProbe parses render status + publish date from fetch stubs",
 
   try {
     const probe = new SuperMaxStatusProbe({
-      renderUrl: "http://192.168.0.188:8082",
-      siteUrl: "https://supermax.quest/",
+      renderUrl: "http://10.0.0.10:8082",
+      siteUrl: "https://example-site.test/",
     });
     const s = await probe.poll();
     assert.equal(s.render.ok, true);
@@ -54,7 +54,7 @@ test("SuperMaxStatusProbe degrades when renderer is unreachable", async () => {
     if (u.includes("render_status.json")) {
       throw new Error("fetch failed");
     }
-    if (u.startsWith("https://supermax.quest")) {
+    if (u.startsWith("https://example-site.test")) {
       return {
         ok: true, status: 200,
         text: async () => `<meta name="x-publish-date" content="2026-10-07T13:48:28+02:00">`,
@@ -65,8 +65,8 @@ test("SuperMaxStatusProbe degrades when renderer is unreachable", async () => {
 
   try {
     const probe = new SuperMaxStatusProbe({
-      renderUrl: "http://192.168.0.188:8082",
-      siteUrl: "https://supermax.quest/",
+      renderUrl: "http://10.0.0.10:8082",
+      siteUrl: "https://example-site.test/",
     });
     const s = await probe.poll();
     assert.equal(s.render, null);
@@ -83,4 +83,29 @@ test("SuperMaxStatusProbe not enabled without any URL", async () => {
   const s = await probe.poll();
   assert.equal(s.enabled, false);
   assert.match(s.error, /not configured/);
+});
+
+test("SuperMaxStatusProbe reports the active render host (stubbed ping)", async () => {
+  const probe = new SuperMaxStatusProbe({
+    renderHosts: [
+      { host: "10.0.0.10", label: "windows", os: "windows" },
+      { host: "10.0.0.11", label: "linux", os: "linux" },
+    ],
+  });
+  // stub the TCP ping: .10 down, .11 up -> linux host active
+  probe._ping = async (host) => host === "10.0.0.11";
+  const rh = await probe._renderHostStatus();
+  assert.deepEqual(rh, { host: "10.0.0.11", label: "linux", os: "linux" });
+});
+
+test("SuperMaxStatusProbe reports null when no render host responds", async () => {
+  const probe = new SuperMaxStatusProbe({
+    renderHosts: [
+      { host: "10.0.0.10", label: "windows", os: "windows" },
+      { host: "10.0.0.11", label: "linux", os: "linux" },
+    ],
+  });
+  probe._ping = async () => false;
+  const rh = await probe._renderHostStatus();
+  assert.equal(rh, null);
 });
