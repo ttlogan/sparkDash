@@ -1712,9 +1712,16 @@ function forceBroadcast() {
 function startBroadcast() {
   const interval = getSettings().pollIntervalMs;
   broadcastTimer = setInterval(() => {
+    // Nothing listening: skip the snapshot rebuild + JSON.stringify + compare.
+    // This was the dominant idle CPU cost (GC + serialization ran every tick
+    // even with zero clients). The on-connect handler and forceBroadcast()
+    // still send independently, so a client that connects is never starved.
+    if (wss.clients.size === 0) {
+      _lastBroadcastPayload = null; // ensure a fresh payload on next connect
+      return;
+    }
     const payload = buildSnapshotPayload();
     // Skip the broadcast entirely when nothing changed since the last tick.
-    // A 1s poll that produces identical snapshots becomes free for idle tabs.
     if (_lastBroadcastPayload !== null && payload === _lastBroadcastPayload) return;
     _lastBroadcastPayload = payload;
     broadcastPayload(payload);
