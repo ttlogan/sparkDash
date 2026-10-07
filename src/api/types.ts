@@ -551,6 +551,29 @@ export interface WsSnapshot {
   refreshInterval: number;
 }
 
+// Type for the Super Max render + publish status probe (the "Ted" fork addition).
+export interface SuperMaxRender {
+  ok?: boolean;
+  error?: string | null;
+  rendering?: boolean;
+  device?: string | null;
+  loopStrength?: number | null;
+  done?: string[];
+  completed?: number;
+  total?: number;
+  currentBeat?: string | null;
+  queue?: number;
+}
+
+export interface SuperMaxStatus {
+  enabled: boolean;
+  error?: string | null;
+  render?: SuperMaxRender | null;
+  renderError?: string | null;
+  publishDate?: string | null;
+  publishError?: string | null;
+}
+
 export interface FleetEnergy {
   estimated: boolean;
   membershipChanged: boolean;

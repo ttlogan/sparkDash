@@ -6,6 +6,7 @@ import { ConfirmShutdownDialog } from "../ConfirmShutdownDialog";
 import { MetricBar } from "../ui/MetricBar";
 import { FleetEnergyCard } from "./FleetEnergyCard";
 import { LiteLlmKeysPanel } from "./LiteLlmKeysPanel";
+import { SuperMaxPanel } from "./SuperMaxPanel";
 import { FleetAlertStrip } from "./FleetAlertStrip";
 import { FleetTokenTotals } from "./FleetTokenTotals";
 import { ActivityIcon, PowerOffIcon, PowerOnIcon, RotateIcon } from "../ui/icons";
@@ -728,6 +729,7 @@ export function OverviewPage({
             onSelect={onSelectSpark}
           />
         ))}
+        <SuperMaxPanel />
       </div>
     </div>
   );
