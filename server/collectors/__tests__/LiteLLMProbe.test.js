@@ -69,6 +69,26 @@ test("LiteLLMProbe aggregates per-key tokens and labels from metadata", async ()
   assert.equal(probe.error, null);
 });
 
+test("LiteLLMProbe serves cached aggregate without re-fetching within the window", async () => {
+  fakeLiteLLM("http://litellm:4000");
+  process.env.LITELLM_PROBE_KEY = "sk-master";
+  let fetchCount = 0;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (u, opts) => {
+    fetchCount++;
+    return origFetch(u, opts);
+  };
+  const probe = new LiteLLMProbe({ litellmProbeUrl: "http://litellm:4000", cacheMs: 60000 });
+  await probe.poll();
+  const firstCount = fetchCount;
+  await probe.poll();
+  await probe.poll();
+  // Within the cache window, later polls must not hit the network again.
+  assert.equal(fetchCount, firstCount, "repeated polls within cacheMs should not re-fetch");
+  assert.ok(probe.keys.length > 0, "cached keys present");
+  globalThis.fetch = origFetch;
+});
+
 test("LiteLLMProbe disabled when not configured", async () => {
   delete process.env.LITELLM_PROBE_KEY;
   const probe = new LiteLLMProbe({ litellmProbeUrl: "" });

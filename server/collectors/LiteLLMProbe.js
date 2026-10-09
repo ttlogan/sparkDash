@@ -33,6 +33,10 @@ import { createHash } from "node:crypto";
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_POLL_MS = 30000; // spend logs are slow-ish; don't hammer
+const DEFAULT_CACHE_MS = 300000; // cached for 5 min: the raw /spend/logs fetch is ~70MB
+// and only changes as cumulative per-key totals tick up, so re-fetching it on the
+// frontend's 30s poll would hammer LiteLLM. The aggregated result is served from
+// cache within this window and refreshed at this cadence.
 // Reference MSRP in USD per 1M tokens (input / output). Used to show what the
 // same token volume would cost on a paid frontier model, so the dashboard can
 // express the value of running it locally for free.
@@ -63,6 +67,12 @@ export class LiteLLMProbe {
     this.masterKey = process.env.LITELLM_PROBE_KEY || "";
     this.timeoutMs = Number(process.env.LITELLM_PROBE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
     this.pollMs = Number(process.env.LITELLM_PROBE_POLL_MS || DEFAULT_POLL_MS);
+    this.cacheMs = Number(process.env.LITELLM_PROBE_CACHE_MS || DEFAULT_CACHE_MS);
+    // Cached aggregate so repeated polls (the frontend calls this every 30s) don't
+    // each re-fetch the ~70MB raw /spend/logs. Served until cacheMs elapses, then
+    // refreshed once. Never throws: stale data is better than a blank panel.
+    this._cacheExpiresAt = 0;
+    this._cachedKeys = null;
     this.enabled = Boolean(this.baseUrl && this.masterKey);
     this.error = null;
     this.lastPollAt = 0;
@@ -107,6 +117,15 @@ export class LiteLLMProbe {
     this.enabled = Boolean(this.baseUrl && this.masterKey);
     if (!this.enabled) {
       this.error = "LiteLLM probe not configured (set LITELLM_PROBE_URL + LITELLM_PROBE_KEY)";
+      return this.keys;
+    }
+    // Serve the cached aggregate if still fresh — avoids re-fetching the ~70MB raw
+    // /spend/logs every time the frontend polls (it polls every 30s). The cached
+    // result is the same per-key profile; it just lags by up to cacheMs, which is
+    // fine for a slowly-changing cumulative total.
+    if (this._cachedKeys && Date.now() < this._cacheExpiresAt) {
+      this.keys = this._cachedKeys;
+      this.error = null;
       return this.keys;
     }
     try {
@@ -170,6 +189,10 @@ export class LiteLLMProbe {
       this.keys.sort((a, b) => b.totalTokens - a.totalTokens);
       this.error = null;
       this.lastPollAt = Date.now();
+      // Cache the freshly-aggregated result so the next poll (frontend hits this
+      // every 30s) is served without re-fetching the heavy /spend/logs.
+      this._cachedKeys = this.keys;
+      this._cacheExpiresAt = Date.now() + this.cacheMs;
     } catch (e) {
       this.error = `LiteLLM probe failed: ${e.message}`;
       this.keys = [];
