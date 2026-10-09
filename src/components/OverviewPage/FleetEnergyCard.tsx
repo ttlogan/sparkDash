@@ -18,7 +18,7 @@ export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
       .then((next) => { if (!cancelled) { setData(next); setError(null); } })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     void load();
-    const timer = window.setInterval(load, 10_000);
+    const timer = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 

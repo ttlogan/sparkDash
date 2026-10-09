@@ -30,7 +30,7 @@ export function LiteLlmKeysPanel() {
           if (!cancelled) setError(err instanceof Error ? err.message : String(err));
         });
     void load();
-    const timer = window.setInterval(load, 30_000); // spend logs are slow; don't hammer
+    const timer = window.setInterval(load, 600_000); // spend logs are slow; don't hammer
     return () => {
       cancelled = true;
       window.clearInterval(timer);
