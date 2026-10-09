@@ -14,19 +14,24 @@
  * ever returns labels + token counts + spend, never the keys themselves.
  *
  * Endpoints used (all require the master key as Bearer):
- *   GET /spend/logs?summarize=true  -> rows keyed by hashed `api_key` with
- *        prompt/completion/total_tokens + spend (no date filters; this LiteLLM
- *        returns 0 rows when start_date/end_date are passed)
+ *   GET /spend/logs              -> flat per-request rows (api_key + token counts).
+ *        No date filter: correct token totals but a large/slow response. Date
+ *        filters shrink it but zero the token counts on this LiteLLM version, so
+ *        we deliberately fetch unfiltered and rely on a generous timeout.
  *   GET /key/list                  -> hashed key ids
  *   GET /key/info?key=<hash>        -> per-key `key_alias` (friendly label) + spend
  */
 import { createHash } from "node:crypto";
 
-// ponytail: single poll loop, one fetch per endpoint per tick. If the fleet grows
-// past ~10 keys or the spend table is huge, switch /spend/logs to the paginated
-// /spend/logs/v2 and cache labels (they change rarely). Add when needed.
+// ponytail: single poll loop, one fetch per endpoint per tick. /spend/logs with no
+// date filter is the only path that returns correct per-key token totals on this
+// LiteLLM version (passing start_date/end_date shrinks the payload to a few KB but
+// ZEROES the token counts). That unfiltered response is large (tens of MB) and can
+// take several seconds, so the timeout must be generous. If the fleet grows or the
+// spend table balloons, switch to the paginated /spend/logs/v2 and cache labels
+// (they change rarely) instead of lowering the timeout. Add when needed.
 
-const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_POLL_MS = 30000; // spend logs are slow-ish; don't hammer
 // Reference MSRP in USD per 1M tokens (input / output). Used to show what the
 // same token volume would cost on a paid frontier model, so the dashboard can
