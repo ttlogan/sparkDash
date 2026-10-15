@@ -77,3 +77,100 @@ test("LiteLLMProbe disabled when not configured", async () => {
   assert.deepEqual(keys, []);
   assert.match(probe.error, /not configured/);
 });
+
+test("LiteLLMProbe reads cumulative totals from the daily rollup (DB) and is monotonic", async () => {
+  const sha = (t) => createHash("sha256").update(t).digest("hex");
+  const hashA = sha("sk-aaaa");
+  const hashB = sha("sk-bbbb");
+  const keyInfo = {
+    [hashA]: { key_name: "sk-...aaaa", key_alias: "bill laptop", spend: 0.0, metadata: { label: "bill laptop" } },
+    [hashB]: { key_name: "sk-...bbbb", key_alias: null, spend: 0.0, metadata: {} },
+  };
+  // When LITELLM_DB_URL is set, the probe reads ONLY the rollup; asserts it never
+  // falls back to /spend/logs (which would be the capped sliding window).
+  let hitSpendLogs = false;
+  globalThis.fetch = async (u, opts) => {
+    const parsed = new URL(u);
+    assert.equal(opts.headers.Authorization, "Bearer sk-master", "probe must send master key");
+    if (parsed.pathname === "/key/list") {
+      return { ok: true, json: async () => ({ keys: [hashA, hashB] }) };
+    }
+    if (parsed.pathname === "/key/info") {
+      const kh = parsed.searchParams.get("key");
+      return { ok: true, json: async () => ({ key: kh, info: keyInfo[kh] ?? {} }) };
+    }
+    if (parsed.pathname === "/spend/logs") {
+      hitSpendLogs = true; // MUST NOT be reached in DB mode
+      return { ok: true, json: async () => [] };
+    }
+    throw new Error("unexpected path " + parsed.pathname);
+  };
+  process.env.LITELLM_PROBE_KEY = "sk-master";
+  // Rollup returns faithful cumulative totals (larger than what a capped window
+  // would show) — this is exactly the monotonic source.
+  const rollupRows =
+    `${hashA}|300|100\n` +
+    `${hashB}|10|5\n`;
+  const probe = new LiteLLMProbe({
+    litellmProbeUrl: "http://litellm:4000",
+    litellmDbUrl: "postgresql://litellm:sekret@127.0.0.1:5432/litellm",
+    execFile: (file, args, opts, cb) => {
+      assert.equal(file, "psql");
+      assert.match(args[2], /LiteLLM_DailyTeamSpend/);
+      // Password must NOT appear in argv; it must go via PGPASSWORD.
+      assert.ok(!args[0].includes("sekret"), "password must not be in the psql connection arg");
+      assert.equal(opts.env.PGPASSWORD, "sekret", "password passed via PGPASSWORD env");
+      cb(null, rollupRows, "");
+    },
+  });
+  const keys = await probe.poll();
+  assert.equal(hitSpendLogs, false, "DB mode must not fall back to capped /spend/logs");
+  const labeled = keys.find((k) => k.label === "bill laptop");
+  assert.equal(labeled.promptTokens, 300);
+  assert.equal(labeled.completionTokens, 100);
+  assert.equal(labeled.totalTokens, 400);
+  assert.equal(probe.error, null);
+});
+
+test("LiteLLMProbe clamps totals so they never decrease across polls (monotonic)", async () => {
+  const sha = (t) => createHash("sha256").update(t).digest("hex");
+  const hashA = sha("sk-aaaa");
+  const keyInfo = {
+    [hashA]: { key_name: "sk-...aaaa", key_alias: "bill laptop", spend: 0.0, metadata: { label: "bill laptop" } },
+  };
+  // Fallback /spend/logs returns a SMALLER total (300) than the DB rollup (1500),
+  // representing the capped sliding window after a rollup-query error.
+  globalThis.fetch = async (u, opts) => {
+    const parsed = new URL(u);
+    assert.equal(opts.headers.Authorization, "Bearer sk-master", "probe must send master key");
+    if (parsed.pathname === "/key/list") {
+      return { ok: true, json: async () => ({ keys: [hashA] }) };
+    }
+    if (parsed.pathname === "/key/info") {
+      const kh = parsed.searchParams.get("key");
+      return { ok: true, json: async () => ({ key: kh, info: keyInfo[kh] ?? {} }) };
+    }
+    if (parsed.pathname === "/spend/logs") {
+      // Capped window: only the most recent small rows -> total 300.
+      return { ok: true, json: async () => [{ api_key: hashA, prompt_tokens: 200, completion_tokens: 100, total_tokens: 300, spend: 0 }] };
+    }
+    throw new Error("unexpected path " + parsed.pathname);
+  };
+  process.env.LITELLM_PROBE_KEY = "sk-master";
+  let dbCall = 0;
+  const probe = new LiteLLMProbe({
+    litellmProbeUrl: "http://litellm:4000",
+    litellmDbUrl: "postgresql://litellm:sekret@127.0.0.1:5432/litellm",
+    execFile: (file, args, opts, cb) => {
+      dbCall++;
+      if (dbCall === 1) return cb(null, `${hashA}|1000|500\n`, ""); // rollup 1500
+      return cb(new Error("psql down"), "", ""); // 2nd poll: DB errors -> fallback
+    },
+  });
+  const first = await probe.poll();
+  assert.equal(first[0].totalTokens, 1500);
+  // 2nd poll: DB query errors -> falls back to /spend/logs (300). Clamp holds 1500.
+  const second = await probe.poll();
+  assert.equal(second[0].totalTokens, 1500, "clamp keeps total from decreasing");
+  assert.equal(probe.error, null);
+});
