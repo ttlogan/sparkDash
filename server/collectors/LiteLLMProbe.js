@@ -14,29 +14,30 @@
  * ever returns labels + token counts + spend, never the keys themselves.
  *
  * Endpoints used (all require the master key as Bearer):
- *   GET /spend/logs              -> flat per-request rows (api_key + token counts).
- *        No date filter: correct token totals but a large/slow response. Date
- *        filters shrink it but zero the token counts on this LiteLLM version, so
- *        we deliberately fetch unfiltered and rely on a generous timeout.
+ *   GET /spend/logs?summarize=true  -> rows keyed by hashed `api_key` with
+ *        prompt/completion/total_tokens + spend (no date filters; this LiteLLM
+ *        returns 0 rows when start_date/end_date are passed)
  *   GET /key/list                  -> hashed key ids
  *   GET /key/info?key=<hash>        -> per-key `key_alias` (friendly label) + spend
  */
 import { createHash } from "node:crypto";
 
-// ponytail: single poll loop, one fetch per endpoint per tick. /spend/logs with no
-// date filter is the only path that returns correct per-key token totals on this
-// LiteLLM version (passing start_date/end_date shrinks the payload to a few KB but
-// ZEROES the token counts). That unfiltered response is large (tens of MB) and can
-// take several seconds, so the timeout must be generous. If the fleet grows or the
-// spend table balloons, switch to the paginated /spend/logs/v2 and cache labels
-// (they change rarely) instead of lowering the timeout. Add when needed.
+// ponytail: single poll loop, one fetch per endpoint per tick. If the fleet grows
+// past ~10 keys or the spend table is huge, switch /spend/logs to the paginated
+// /spend/logs/v2 and cache labels (they change rarely). Add when needed.
+//
+// CUMULATIVE TOTALS: litellm caps /spend/logs?summarize=true at the 10,000 most
+// recent rows, so "lifetime" per-key totals recomputed from it ROLL OFF as the
+// table grows and the displayed sum creeps DOWNWARD even while new work is
+// logged. To keep the panel monotonic we read the per-key cumulative directly
+// from litellm's own daily rollup (LiteLLM_DailyTeamSpend) via a read-only
+// psql query when LITELLM_DB_URL is set; otherwise we fall back to the capped
+// /spend/logs window. The rollup is authoritative (its totals exactly match the
+// raw spend log) and small, so it also cuts the churn of re-pulling the full
+// spend log every poll.
 
-const DEFAULT_TIMEOUT_MS = 20000;
+const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_POLL_MS = 30000; // spend logs are slow-ish; don't hammer
-const DEFAULT_CACHE_MS = 300000; // cached for 5 min: the raw /spend/logs fetch is ~70MB
-// and only changes as cumulative per-key totals tick up, so re-fetching it on the
-// frontend's 30s poll would hammer LiteLLM. The aggregated result is served from
-// cache within this window and refreshed at this cadence.
 // Reference MSRP in USD per 1M tokens (input / output). Used to show what the
 // same token volume would cost on a paid frontier model, so the dashboard can
 // express the value of running it locally for free.
@@ -65,18 +66,20 @@ export class LiteLLMProbe {
   constructor(opts = {}) {
     this.baseUrl = (opts.litellmProbeUrl || process.env.LITELLM_PROBE_URL || "").replace(/\/$/, "");
     this.masterKey = process.env.LITELLM_PROBE_KEY || "";
+    this.dbUrl = opts.litellmDbUrl || process.env.LITELLM_DB_URL || "";
+    this.dbEnabled = Boolean(this.dbUrl);
+    // test seam: inject a psql runner; default is real child_process.execFile
+    this._execFile = opts.execFile || null;
     this.timeoutMs = Number(process.env.LITELLM_PROBE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
     this.pollMs = Number(process.env.LITELLM_PROBE_POLL_MS || DEFAULT_POLL_MS);
-    this.cacheMs = Number(process.env.LITELLM_PROBE_CACHE_MS || DEFAULT_CACHE_MS);
-    // Cached aggregate so repeated polls (the frontend calls this every 30s) don't
-    // each re-fetch the ~70MB raw /spend/logs. Served until cacheMs elapses, then
-    // refreshed once. Never throws: stale data is better than a blank panel.
-    this._cacheExpiresAt = 0;
-    this._cachedKeys = null;
     this.enabled = Boolean(this.baseUrl && this.masterKey);
     this.error = null;
     this.lastPollAt = 0;
     this.keys = []; // [{ keyHash, label, promptTokens, completionTokens, totalTokens, spend }]
+    // Monotonic clamp: track the highest cumulative total seen per key so a
+    // transient rollup-query error (which falls back to the capped /spend/logs
+    // window) can never make the displayed total go DOWN. Map<keyHash, totalTokens>.
+    this._maxTotals = new Map();
   }
 
   _headers() {
@@ -93,6 +96,57 @@ export class LiteLLMProbe {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Read per-key cumulative token totals from litellm's daily rollup.
+   * Returns a Map<api_key_hash, {promptTokens, completionTokens, totalTokens}>.
+   *
+   * Read-only, uncapped, monotonic. Uses psql subprocess (no new dependency);
+   * LITELLM_DB_URL is supplied at runtime via env, never committed. The password
+   * is passed via PGPASSWORD (not argv) so it never shows in `ps aux`. Returns an
+   * empty Map (so the caller falls back to /spend/logs) when disabled or on error.
+   */
+  async _spendFromDb() {
+    if (!this.dbEnabled) return new Map();
+    const { execFile } = this._execFile
+      ? { execFile: this._execFile }
+      : await import("node:child_process");
+    // Split the connection URI so the password goes via PGPASSWORD, not argv.
+    // postgresql://user:pass@host:port/db
+    const url = new URL(this.dbUrl);
+    const pw = url.password ? decodeURIComponent(url.password) : "";
+    url.password = ""; // strip from the argv connection string
+    const conn = url.toString().replace(/\/$/, "");
+    const env = { ...process.env };
+    if (pw) env.PGPASSWORD = pw;
+    const sql =
+      "SELECT api_key, sum(prompt_tokens) AS p, sum(completion_tokens) AS c " +
+      "FROM \"LiteLLM_DailyTeamSpend\" GROUP BY api_key";
+    return new Promise((resolve) => {
+      execFile(
+        "psql",
+        [conn, "-tAc", sql],
+        { timeout: this.timeoutMs, maxBuffer: 1 << 20, env },
+        (err, stdout) => {
+          if (err) return resolve(new Map());
+          const agg = new Map();
+          for (const line of stdout.trim().split("\n")) {
+            if (!line.trim()) continue;
+            const [api_key, p, c] = line.split("|");
+            const promptTokens = Number(p || 0);
+            const completionTokens = Number(c || 0);
+            if (!api_key) continue;
+            agg.set(api_key, {
+              promptTokens,
+              completionTokens,
+              totalTokens: promptTokens + completionTokens,
+            });
+          }
+          resolve(agg);
+        }
+      );
+    });
   }
 
   /** Friendly label from a key record; falls back to the key's user_id or "unlabeled". */
@@ -119,33 +173,28 @@ export class LiteLLMProbe {
       this.error = "LiteLLM probe not configured (set LITELLM_PROBE_URL + LITELLM_PROBE_KEY)";
       return this.keys;
     }
-    // Serve the cached aggregate if still fresh — avoids re-fetching the ~70MB raw
-    // /spend/logs every time the frontend polls (it polls every 30s). The cached
-    // result is the same per-key profile; it just lags by up to cacheMs, which is
-    // fine for a slowly-changing cumulative total.
-    if (this._cachedKeys && Date.now() < this._cacheExpiresAt) {
-      this.keys = this._cachedKeys;
-      this.error = null;
-      return this.keys;
-    }
     try {
-      // 1) per-key token counts from spend logs (aggregated). NOTE: this
-      //    LiteLLM version returns 0 rows whenever start_date/end_date are
-      //    passed (timezone/filter bug) and 500s on a datetime, so omit the
-      //    filters and take all rows. Home-lab: few rows; add pagination if the
-      //    spend table grows large.
-      const spendRows = await this._get(`/spend/logs?summarize=true`);
-      const agg = new Map(); // keyHash -> {prompt,completion,total,spend}
-      const rows = Array.isArray(spendRows) ? spendRows : spendRows?.data || [];
-      for (const row of rows) {
-        const kh = row?.api_key;
-        if (!kh) continue;
-        const cur = agg.get(kh) || { promptTokens: 0, completionTokens: 0, totalTokens: 0, spend: 0 };
-        cur.promptTokens += Number(row.prompt_tokens || 0);
-        cur.completionTokens += Number(row.completion_tokens || 0);
-        cur.totalTokens += Number(row.total_tokens || 0);
-        cur.spend += Number(row.spend || 0);
-        agg.set(kh, cur);
+      // 1) per-key cumulative token counts. When LITELLM_DB_URL is set, read the
+      //    authoritative monotonic daily rollup (uncapped). Otherwise fall back to
+      //    /spend/logs?summarize=true, which litellm caps at the newest 10k rows
+      //    (a sliding window: old large rows roll off and cumulative totals creep
+      //    DOWN even while new work is logged).
+      const dbAgg = await this._spendFromDb();
+      let agg = dbAgg; // Map<keyHash, {promptTokens, completionTokens, totalTokens}>
+      if (dbAgg.size === 0) {
+        const spendRows = await this._get(`/spend/logs?summarize=true`);
+        agg = new Map(); // keyHash -> {prompt,completion,total,spend}
+        const rows = Array.isArray(spendRows) ? spendRows : spendRows?.data || [];
+        for (const row of rows) {
+          const kh = row?.api_key;
+          if (!kh) continue;
+          const cur = agg.get(kh) || { promptTokens: 0, completionTokens: 0, totalTokens: 0, spend: 0 };
+          cur.promptTokens += Number(row.prompt_tokens || 0);
+          cur.completionTokens += Number(row.completion_tokens || 0);
+          cur.totalTokens += Number(row.total_tokens || 0);
+          cur.spend += Number(row.spend || 0);
+          agg.set(kh, cur);
+        }
       }
 
       // 2) friendly labels + per-key spend. This LiteLLM has no list /key/info,
@@ -180,19 +229,23 @@ export class LiteLLMProbe {
       for (const [kh, v] of agg) {
         if (!liveHashes.has(kh)) continue;
         const label = labelByHash.get(kh) || "unlabeled";
+        // Monotonic clamp: never report a lower cumulative than a prior poll.
+        const prevMax = this._maxTotals.get(kh) || 0;
+        const totalTokens = Math.max(v.totalTokens || 0, prevMax);
+        this._maxTotals.set(kh, totalTokens);
+        // If clamped, scale prompt/completion to the clamped total (keep ratio).
+        const scale = (v.totalTokens || 0) > 0 ? totalTokens / (v.totalTokens || 0) : 1;
+        const promptTokens = Math.round((v.promptTokens || 0) * scale);
+        const completionTokens = Math.round((v.completionTokens || 0) * scale);
         // Hypothetical cost if the same tokens were billed at reference MSRP.
         const m = msrpFor();
         const costAtMsrp =
-          ((v.promptTokens || 0) * m.inputPerM + (v.completionTokens || 0) * m.outputPerM) / 1e6;
-        this.keys.push({ keyHash: kh, label, model: m.model, ...v, costAtMsrp });
+          (promptTokens * m.inputPerM + completionTokens * m.outputPerM) / 1e6;
+        this.keys.push({ keyHash: kh, label, model: m.model, promptTokens, completionTokens, totalTokens, spend: v.spend ?? 0, costAtMsrp });
       }
       this.keys.sort((a, b) => b.totalTokens - a.totalTokens);
       this.error = null;
       this.lastPollAt = Date.now();
-      // Cache the freshly-aggregated result so the next poll (frontend hits this
-      // every 30s) is served without re-fetching the heavy /spend/logs.
-      this._cachedKeys = this.keys;
-      this._cacheExpiresAt = Date.now() + this.cacheMs;
     } catch (e) {
       this.error = `LiteLLM probe failed: ${e.message}`;
       this.keys = [];

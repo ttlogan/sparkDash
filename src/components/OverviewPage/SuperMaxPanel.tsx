@@ -78,6 +78,7 @@ export function SuperMaxPanel() {
   const completed = render?.completed ?? 0;
   const total = render?.total ?? 9;
   const finished = total > 0 && completed >= total;
+  const re_render = Boolean(render?.re_render);
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   const publish = data?.publishDate;
 
@@ -100,7 +101,7 @@ export function SuperMaxPanel() {
         </div>
         {rendering ? (
           <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
-            Rendering
+            {re_render ? "Re-rendering" : "Rendering"}
           </span>
         ) : finished ? (
           <span className="rounded bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success">
@@ -131,14 +132,16 @@ export function SuperMaxPanel() {
               <div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-text-strong">
-                    {finished
-                      ? "Render complete"
+                    {re_render
+                      ? "Re-rendering panels…"
                       : rendering
                         ? `Rendering ${beatLabel(render.currentBeat)}`
-                        : "Render pending"}
+                        : finished
+                          ? "Render complete"
+                          : "Render pending"}
                   </span>
                   <span className="font-tabular text-muted">
-                    {completed}/{total} · {pct}%
+                    {re_render ? "in progress" : `${completed}/${total} · ${pct}%`}
                   </span>
                 </div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded bg-surface-elevated">
