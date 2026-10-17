@@ -563,11 +563,15 @@ export interface SuperMaxRender {
   total?: number;
   currentBeat?: string | null;
   queue?: number;
+  /** True when the render box is re-rendering an existing frame (e.g. a re-render pass). */
+  re_render?: boolean;
 }
 
 export interface SuperMaxRenderHost {
   host: string;
   label: string;
+  /** Render box OS: "linux" (ComfyUI) or "windows" (sd 1111 / A1111). */
+  os: string;
 }
 
 export interface SuperMaxStatus {

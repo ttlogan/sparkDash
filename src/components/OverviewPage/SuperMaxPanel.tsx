@@ -73,6 +73,9 @@ export function SuperMaxPanel() {
     };
   }, []);
 
+  // Opt-in panel: hidden unless SUPERMAX_ENABLED is set (default off).
+  if (!data?.enabled) return null;
+
   const render = data?.render;
   const rendering = Boolean(render?.rendering);
   const completed = render?.completed ?? 0;

@@ -6,9 +6,6 @@
   <img src="https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express" alt="Express 5">
   <img src="https://img.shields.io/badge/license-MIT-2d9d78?style=flat-square" alt="MIT License">
   <br>
-  <sub>by <a href="https://x.com/MiaAI_lab">Mia'a AI Lab</a></sub>
-  <br><br>
-  <a href="https://x.com/MiaAI_lab" target="_blank" style="display:inline-block;margin:0 8px;vertical-align:middle;"><img src="https://img.shields.io/badge/Follow%20me%20on%20X-000000?style=for-the-badge&logo=x&logoColor=white" alt="Follow Mia on X" height="28" style="height:28px;width:auto;vertical-align:middle;border:0;" /></a>
 </p>
 
 sparkDash is a real-time web dashboard for one or more **NVIDIA DGX Spark (GB10)** machines in a single browser window. It streams GPU, CPU, unified memory, storage, network, and local LLM metrics — and lets you add, edit, reorder, or remove Sparks from the UI without restarts or code changes.
@@ -19,11 +16,11 @@ It also supports **non-Spark units**: any Linux machine with an NVIDIA GPU (e.g.
 
 ### LLM Prompt Showcase
 
-<a href="https://github.com/MiaAI-Lab/sparkDash/releases/download/media-showcase/llm-showcase.mp4">
+<a href="https://github.com/ttlogan/sparkDash/releases/download/media-showcase/llm-showcase.mp4">
   <img src="./assets/llm-showcase.gif" alt="LLM Prompt Showcase — multi-terminal streaming demo (click for MP4)" width="100%">
 </a>
 
-<p align="center"><sub><a href="https://github.com/MiaAI-Lab/sparkDash/releases/download/media-showcase/llm-showcase.mp4">Download MP4</a> · also in <code>assets/llm-showcase.mp4</code></sub></p>
+<p align="center"><sub><a href="https://github.com/ttlogan/sparkDash/releases/download/media-showcase/llm-showcase.mp4">Download MP4</a> · also in <code>assets/llm-showcase.mp4</code></sub></p>
 
 ---
 
@@ -76,7 +73,7 @@ Full history: [CHANGELOG.md](./CHANGELOG.md)
 | **Prefill benchmark** | Context-size sweep (1k–300k) of prefill tok/s and TTFT; unique prefix per size; persisted last run. Same remote targeting as decode |
 | **Prompt Showcase** | Full-page multi-terminal LLM streaming demo (up to 32 prompts) with live tok/s and copy-out |
 | **LLM inference health** | KV cache %, run/wait queue, TTFT/E2E/ITL p95, preemptions, prefix cache, MTP accept from Prometheus `/metrics` (vLLM and q27; q27 FIFO-queues so the Requests tile reads “N run” without a wait gauge) |
-| **LiteLLM key usage** | Per-access-key token counts (prompt / completion / total), spend, and cost-at-reference-MSRP from the LiteLLM proxy admin API (`/spend/logs` + `/key/info`). Friendly `metadata` labels per key; the served model is always shown on the LLM card, and the panel's MSRP comparator defaults to Claude Opus 4-8 (1M ctx, $5/$25 per M) via `LITELLM_MSRP_MODEL`. Never stores or commits keys |
+| **LiteLLM key usage** | Per-access-key token counts (prompt / completion / total), spend, and cost-at-reference-MSRP from the LiteLLM proxy admin API (`/spend/logs` + `/key/info`). Friendly `metadata` labels per key; the served model is always shown on the LLM card, and the panel's MSRP comparator defaults to Claude Sonnet (1M ctx, $3/$15 per M) via `LITELLM_MSRP_MODEL`. Never stores or commits keys |
 | **Multiple LLM ports** | Monitor several LLM servers on different ports simultaneously — each gets its own panel with independent backend detection and metrics |
 | **GPU processes** | See the top GPU processes by VRAM usage directly in the GPU panel, including process name and memory allocation |
 | **Multi-GPU hosts** | A dedicated GPU host with several NVIDIA cards reports each one: the header names every card, the GPU panel adds a block per card (throttle chip, usage and temperature sparklines, power, VRAM bar) and the API exposes `gpu.gpus[]`. The headline `gpu` numbers stay an aggregate of all cards, so Overview cards and alerts need no change |
@@ -239,7 +236,7 @@ Env (optional): `POLL_INTERVAL_TAILSCALE` (default `30000`), `TAILSCALE_PROBE_TI
 ## Quick start
 
 ```bash
-git clone https://github.com/MiaAI-Lab/sparkDash.git
+git clone https://github.com/ttlogan/sparkDash.git
 cd sparkDash
 
 # Production (Docker; loopback-only by default)
@@ -435,6 +432,12 @@ Copy `.env.example` to `.env` if needed:
 | `SSH_CONTROL_PERSIST_SECONDS` | `60` | Idle SSH transport persistence in seconds, capped at `3600`. Set to `0` to disable multiplexing. |
 | `FLEET_ENERGY_JSON_PATH` | `config/fleet-energy.json` | Rolling fleet-energy persistence path |
 | `ELECTRICITY_PRICE_PER_KWH` | `0.30` | EUR/kWh used to estimate fleet energy cost (default: Naples, Italy retail average). Override to match your tariff. |
+| `SUPERMAX_ENABLED` | _(off)_ | Show the **Super Max render panel** on the Overview. Off by default so instances that don't run the pipeline see no dead card. Set `true` to opt in. |
+| `SUPERMAX_RENDER_URL` | _(empty)_ | Base URL of the Super Max render box, used by the render status panel. |
+| `SUPERMAX_SITE_URL` | _(empty)_ | Published site URL for the Super Max render. |
+| `SUPERMAX_RENDER_HOSTS` | _(empty)_ | Comma-separated render hosts to scan for an active render. |
+
+The **Super Max render panel** on the Overview page is opt-in: it stays hidden unless `SUPERMAX_ENABLED` is set to a truthy value (`true`, `1`, `yes`, `on`) **and** at least one of `SUPERMAX_RENDER_URL` / `SUPERMAX_SITE_URL` is configured. Default is off.
 
 For compatibility, `SSH_CONTROL_PERSIST` is accepted as a seconds-based fallback when `SSH_CONTROL_PERSIST_SECONDS` is unset. The existing `SSH_MULTIPLEX=0` switch also disables reuse. SSH tunnels always use an independent connection.
 
@@ -541,7 +544,7 @@ One `SystemCollector` path for both modes. When `spark.isLocal` is true, metrics
 
 ### Remote SSH sessions and host memory
 
-Older sparkDash versions could create hundreds of SSH/PAM login sessions per minute on each remote host. [Issue #73](https://github.com/MiaAI-Lab/sparkDash/issues/73) documents the resulting session churn and observed `polkitd` memory growth. Connection reuse reduces this churn while retaining the collector refresh cadence. After updating, verify that metrics keep advancing and that new SSH authentications/PAM session opens fall after the initial connection; a new SSH client process for each collector command is still expected.
+Older sparkDash versions could create hundreds of SSH/PAM login sessions per minute on each remote host. [Issue #73](https://github.com/ttlogan/sparkDash/issues/73) documents the resulting session churn and observed `polkitd` memory growth. Connection reuse reduces this churn while retaining the collector refresh cadence. After updating, verify that metrics keep advancing and that new SSH authentications/PAM session opens fall after the initial connection; a new SSH client process for each collector command is still expected.
 
 If host memory remains low, compare Linux `MemAvailable` and per-process resident/swap usage. Memory retained by `polkitd` requires separate OS investigation: [polkit PR #653](https://github.com/polkit-org/polkit/pull/653) fixes a reference leak in `NoNewPrivileges` queries. Check whether your distribution's polkit package includes that fix. SSH reuse neither applies the OS patch nor releases memory already retained by another process.
 
@@ -582,7 +585,7 @@ Contributions are welcome. Conventions:
 
 ## License
 
-[MIT](./LICENSE) — Copyright (c) 2026 Mia'a AI Lab
+[MIT](./LICENSE) — Copyright (c) 2026 ttlogan
 
 ---
 

@@ -49,7 +49,11 @@ export class SuperMaxStatusProbe {
     this.pingMs = Number(process.env.SUPERMAX_PROBE_PING_MS || DEFAULT_PING_MS);
     this.timeoutMs = Number(process.env.SUPERMAX_PROBE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
     this.pollMs = Number(process.env.SUPERMAX_PROBE_POLL_MS || DEFAULT_POLL_MS);
-    this.enabled = Boolean(this.renderUrl || this.siteUrl || this.renderHosts.length);
+    // Panel opt-in: show the render panel ONLY when SUPERMAX_ENABLED is truthy.
+    // Default OFF so a fork/instance that doesn't run the Super Max pipeline sees
+    // no dead panel. Reads stay env-only (never committed).
+    this.panelEnabled = /^(1|true|yes|on)$/i.test(String(process.env.SUPERMAX_ENABLED || "").trim());
+    this.enabled = this.panelEnabled && Boolean(this.renderUrl || this.siteUrl || this.renderHosts.length);
     this.error = null;
     this.lastPollAt = 0;
   }
@@ -99,7 +103,7 @@ export class SuperMaxStatusProbe {
    * sets this.error and returns a degraded object.
    */
   async poll() {
-    this.enabled = Boolean(this.renderUrl || this.siteUrl);
+    this.enabled = this.panelEnabled && Boolean(this.renderUrl || this.siteUrl);
     if (!this.enabled) {
       this.error = "SuperMax probe not configured (set SUPERMAX_RENDER_URL or SUPERMAX_SITE_URL)";
       return { enabled: false, error: this.error, render: null, publishDate: null };
