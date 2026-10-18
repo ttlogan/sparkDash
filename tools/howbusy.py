@@ -208,7 +208,7 @@ def main():
     p_h = metric(mt, "prefix_cache_hits_total")
     prefix_pct = f"{p_h / p_q * 100:.1f}" if (p_q and p_h is not None) else "?"
 
-    log = sh(f"sudo -u wfoster podman logs --tail 2000 {CONT}")
+    log = sh(f"sudo -u \"${{SUDO_USER:-$(id -un)}}\" podman logs --tail 2000 {CONT}")
     eng = last_line(log, "Engine 000:")
     mtp = last_line(log, "SpecDecoding metrics:")
     gen_tp = re.search(r"Avg generation throughput: ([\d.]+)", eng)
